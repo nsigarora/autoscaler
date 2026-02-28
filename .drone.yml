@@ -9,7 +9,7 @@ trigger:
 
 platform:
   os: linux
-  arch: amd64
+  arch: arm64
 
 node:
   type: arm-2x-dp
