@@ -7,6 +7,13 @@ trigger:
   event:
     - custom
 
+platform:
+  os: linux
+  arch: amd64
+
+node:
+  type: arm-2x-dp
+
 steps:
 - name: wait-for-sandbox
   image: artifactory-rd.netskope.io/dockerhub/docker
@@ -62,13 +69,26 @@ steps:
   commands:
   - sh .drone.sh
 
-- name: build-autoscaler
+- name: build-and-push-multiarch
   image: artifactory-rd.netskope.io/dockerhub/docker
+  environment:
+    TAG: $(cat /tmp/ep-version-artifactory-docker)
+    ARTIFACTORY_PASSWORD:
+      from_secret: global_artifactory_password
+    ARTIFACTORY_USER: $${NS_ARTIFACTORY_USER}
   commands:
-    - docker build -t drone-autoscaler -f Dockerfile .
+    # Login to Artifactory
+    - echo $${ARTIFACTORY_PASSWORD} | docker login -u $${ARTIFACTORY_USER} --password-stdin artifactory-rd.netskope.io
+    # Setup buildx
+    - docker buildx create --use --name multiarch-builder || true
+    - docker buildx inspect --bootstrap
+    # Build and push multi-arch image (version tag only)
+    - docker buildx build --platform linux/amd64,linux/arm64 -t artifactory-rd.netskope.io/docker-playground/drone-autoscaler:$(eval echo $TAG) --push -f Dockerfile .
   volumes:
     - name: sandbox-docker-sock
       path: /var/run
+    - name: ep-version
+      path: /tmp
 
 - name: get version
   image: artifactory-rd.netskope.io/org-base-release-docker/ns-ep/git-alpine-current:24.84.259
@@ -77,32 +97,11 @@ steps:
     # - chmod 755 $SCRIPT_DIR/get_version.sh
     # - VERSION=$($SCRIPT_DIR/get_version.sh)
     # - echo $VERSION > /tmp/ep-version-artifactory-docker
-    - echo "arm64" > /tmp/ep-version-artifactory-docker
+    - echo "multi-arch" > /tmp/ep-version-artifactory-docker
   volumes:
     - name: ep-version
       path: /tmp
 
-- name: publish
-  image: artifactory-rd.netskope.io/drone-plugins/artifactory-docker:latest
-  environment:
-    TAG: $(cat /tmp/ep-version-artifactory-docker)
-  settings:
-    url:
-      from_secret: global_artifactory_url
-    user: $${NS_ARTIFACTORY_USER}
-    password:
-      from_secret: global_artifactory_password
-    build_name: drone-autoscaler
-    target_repo: docker-playground
-    artifactory: $NS_ARTIFACTORY_HOST
-    latest_tag: true
-    images: drone-autoscaler
-    tag: $(eval echo $TAG)
-  volumes:
-    - name: ep-version
-      path: /tmp
-    - name: sandbox-docker-sock
-      path: /var/run
 
 services:
   - name: mysql
@@ -118,7 +117,7 @@ services:
       POSTGRES_DB: test
       POSTGRES_PASSWORD: password
   - name: docker-sandbox
-    image: artifactory-rd.netskope.io/drone-plugins/docker-dind
+    image: artifactory-rd.netskope.io/drone-plugins/docker-dind:25.92.11
     privileged: true
     volumes:
       - name: sandbox-docker-sock

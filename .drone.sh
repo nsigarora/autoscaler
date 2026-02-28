@@ -3,10 +3,13 @@
 set -e
 set -x
 
-COMMIT="-X main.commit=${DRONE_COMMIT_SHA}"
-VERSION="-X main.version=${DRONE_TAG=latest}"
+COMMIT_SHA="${DRONE_COMMIT_SHA:-unknown}"
+VERSION_TAG="${DRONE_TAG:-latest}"
+
+LDFLAGS="-extldflags=-static -X main.commit=${COMMIT_SHA} -X main.version=${VERSION_TAG}"
 
 go build \
-    -ldflags "-extldflags \"-static\" $COMMIT $VERSION"   \
-	-o release/linux/amd64/drone-autoscaler \
-	github.com/drone/autoscaler/cmd/drone-autoscaler
+  -ldflags "${LDFLAGS}" \
+  -o release/linux/amd64/drone-autoscaler \
+  github.com/drone/autoscaler/cmd/drone-autoscaler
+  
