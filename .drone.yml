@@ -77,7 +77,7 @@ steps:
     # - chmod 755 $SCRIPT_DIR/get_version.sh
     # - VERSION=$($SCRIPT_DIR/get_version.sh)
     # - echo $VERSION > /tmp/ep-version-artifactory-docker
-    - echo "1.0.0" > /tmp/ep-version-artifactory-docker
+    - echo "arm64" > /tmp/ep-version-artifactory-docker
   volumes:
     - name: ep-version
       path: /tmp
