@@ -1,16 +1,22 @@
 ---
 kind: pipeline
-name: default
-type: vm
+name: drone-autoscaler
+type: docker
 
-pool:
-  use: ubuntu
-
-platform:
-  os: linux
-  arch: amd64
+trigger:
+  event:
+    - custom
 
 steps:
+- name: wait-for-sandbox
+  image: artifactory-rd.netskope.io/dockerhub/docker
+  commands:
+    - chmod +x scripts/waitForSandbox.sh
+    - ./scripts/waitForSandbox.sh
+  volumes:
+    - name: sandbox-docker-sock
+      path: /var/run
+
 - name: test
   pull: default
   image: golang
@@ -56,38 +62,73 @@ steps:
   commands:
   - sh .drone.sh
 
-- name: publish
-  pull: default
-  image: plugins/docker
-  settings:
-    auto_tag: true
-    repo: drone/autoscaler
-    password:
-      from_secret: docker_password
-    username:
-      from_secret: docker_username
-  when:
-    event:
-    - push
-    - tag
+- name: build-autoscaler
+  image: artifactory-rd.netskope.io/dockerhub/docker
+  commands:
+    - docker build -t drone-autoscaler -f Dockerfile .
+  volumes:
+    - name: sandbox-docker-sock
+      path: /var/run
 
-volumes:
-- name: deps
-  temp: {}
+- name: get version
+  image: artifactory-rd.netskope.io/org-base-release-docker/ns-ep/git-alpine-current:24.84.259
+  commands:
+    # - SCRIPT_DIR=$DRONE_WORKSPACE/scripts
+    # - chmod 755 $SCRIPT_DIR/get_version.sh
+    # - VERSION=$($SCRIPT_DIR/get_version.sh)
+    # - echo $VERSION > /tmp/ep-version-artifactory-docker
+    - echo "1.0.0" > /tmp/ep-version-artifactory-docker
+  volumes:
+    - name: ep-version
+      path: /tmp
+
+- name: publish
+  image: artifactory-rd.netskope.io/drone-plugins/artifactory-docker:latest
+  environment:
+    TAG: $(cat /tmp/ep-version-artifactory-docker)
+  settings:
+    url:
+      from_secret: global_artifactory_url
+    user: $${NS_ARTIFACTORY_USER}
+    password:
+      from_secret: global_artifactory_password
+    build_name: drone-autoscaler
+    target_repo: docker-playground
+    artifactory: $NS_ARTIFACTORY_HOST
+    latest_tag: true
+    images: drone-autoscaler
+    tag: $(eval echo $TAG)
+  volumes:
+    - name: ep-version
+      path: /tmp
+    - name: sandbox-docker-sock
+      path: /var/run
 
 services:
-- name: postgres
-  pull: default
-  image: postgres:9
-  environment:
-    POSTGRES_DB: test
-    POSTGRES_PASSWORD: password
+  - name: mysql
+    pull: default
+    image: mysql:5
+    environment:
+      MYSQL_DATABASE: test
+      MYSQL_ROOT_PASSWORD: password
+  - name: postgres
+    pull: default
+    image: postgres:9
+    environment:
+      POSTGRES_DB: test
+      POSTGRES_PASSWORD: password
+  - name: docker-sandbox
+    image: artifactory-rd.netskope.io/drone-plugins/docker-dind
+    privileged: true
+    volumes:
+      - name: sandbox-docker-sock
+        path: /var/run
 
-- name: mysql
-  pull: default
-  image: mysql:5
-  environment:
-    MYSQL_DATABASE: test
-    MYSQL_ROOT_PASSWORD: password
-
-...
+volumes:
+  - name: deps
+    temp: {}
+  - name: sandbox-docker-sock
+    temp: {}
+  - name: ep-version
+    host:
+      path: /tmp
